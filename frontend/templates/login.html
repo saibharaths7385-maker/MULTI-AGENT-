@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Sign in · Synapse</title>
+  <link rel="stylesheet" href="/assets/css/app.css">
+  <script src="/assets/js/login.js" defer></script>
+</head>
+<body class="auth-page">
+  <main class="auth-card">
+    <div class="logo">⚡ Synapse</div>
+    <h1>Welcome back</h1>
+    <p class="muted">Sign in to open your engineering workspace.</p>
+    <div id="setup-message" class="notice" hidden></div>
+    <form id="login-form">
+      <label for="username">Username</label>
+      <input id="username" name="username" autocomplete="username" required>
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+      <p id="login-error" class="error-message" role="alert" hidden></p>
+      <button class="primary full-width" type="submit">Sign in</button>
+    </form>
+  </main>
+</body>
+</html>
