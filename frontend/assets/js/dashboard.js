@@ -23,6 +23,7 @@ let activeTab = "files";
 let project = null;
 let agentStates = {};
 let hasApiKey = false;
+let fastBuild = false;
 let listTimer = null;
 
 async function api(path, options) {
@@ -80,7 +81,9 @@ function showNewProjectForm() {
   closeMenu();
   $("#main").innerHTML = `
     <h1 class="page-title">What should the agents build?</h1>
-    <p class="page-sub">Describe a small Python project. Four agents plan it, write it, test it in a sandbox, fix failures and review the result.</p>
+    <p class="page-sub">${fastBuild
+      ? "Fast mode combines implementation and tests in one model call, runs real pytest, and skips the separate AI review. The approval gate and failure repairs remain."
+      : "Describe a small Python project. Four agents plan it, write it, test it in a sandbox, fix failures and review the result."}</p>
     <div id="app-notice" class="notice" role="status" hidden></div>
     <section class="composer">
       <div class="field">
@@ -92,7 +95,9 @@ function showNewProjectForm() {
         <input class="input" id="constraints" placeholder="Constraints, e.g. Python 3.12, standard library only" aria-label="Constraints" maxlength="1000">
       </div>
       <div class="composer-foot">
-        <div class="mini-track" aria-label="Agent order">Planner<i></i>Engineer<i></i>Tester<i></i>Reviewer</div>
+        <div class="mini-track" aria-label="Build stages">${fastBuild
+          ? "Quick plan<i></i>Engineer + tests<i></i>Real pytest<i></i>Automated report"
+          : "Planner<i></i>Engineer<i></i>Tester<i></i>Reviewer"}</div>
         <button class="btn btn-primary" id="launch">Build my project</button>
       </div>
       <div class="starters"><span>Try one:</span>
@@ -352,6 +357,7 @@ async function initialize() {
     $("#me-email").textContent = status.email || "";
     $("#avatar").textContent = (status.username || "?").charAt(0).toUpperCase();
     hasApiKey = config.has_key;
+    fastBuild = config.fast_build === true;
   } catch (error) {
     if (error.message === "session-expired") return;
     $("#main").innerHTML = `<section class="offline"><h1>Can't reach the workspace</h1>

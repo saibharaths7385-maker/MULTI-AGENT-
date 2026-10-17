@@ -20,6 +20,14 @@ own projects. There is no admin password to configure. `AUTH_SECRET` is optional
 creates one in `DATA_DIR` and reuses it. Set `LLM_API_KEY` (and optionally the other model settings).
 Ollama uses a 15-minute model request timeout by default because local generation can be slower; set
 `LLM_TIMEOUT_SECONDS` to override it. Other providers default to four minutes.
+For Ollama, `FAST_BUILD` defaults to enabled: it creates a local plan, asks the model to return the
+implementation and tests together, runs real pytest, and produces a clearly labeled automated test-result
+review instead of spending extra model calls on separate planner, tester, and reviewer stages. The human
+approval gate remains enabled by default. If the implementation omits test files, Synapse falls back to its
+separate tester call. Failed tests still trigger repair attempts (`MAX_FIX_ROUNDS`, default one in fast mode).
+Set `FAST_BUILD=0` to use the full multi-agent flow, or override `LLM_MAX_OUTPUT_TOKENS` (fast mode defaults
+to 2048) when the project needs a larger response. Fast mode reduces unnecessary calls, but cannot guarantee
+sub-10-second builds: generation speed still depends on the model and hardware.
 Set `COOKIE_SECURE=1` when serving over HTTPS. Do not commit `.env` or real credentials.
 
 ## Forgot password email

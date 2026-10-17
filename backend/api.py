@@ -47,7 +47,7 @@ def require_project(pid, request: Request):
 
 @router.get("/api/config")
 def config():
-    from backend.settings import MAX_FIX, MODEL, NEED_OK, SANDBOX
+    from backend.settings import FAST_BUILD, MAX_FIX, MODEL, NEED_OK, SANDBOX
 
     return {
         "provider": core.PROVIDER,
@@ -56,6 +56,7 @@ def config():
         "has_key": bool(core.KEY),
         "approval": NEED_OK,
         "max_fix": MAX_FIX,
+        "fast_build": FAST_BUILD,
     }
 
 

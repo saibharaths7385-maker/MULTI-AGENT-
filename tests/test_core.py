@@ -1,5 +1,6 @@
 import app
 import pytest
+import time
 
 
 def test_parse_files_and_unsafe_paths():
@@ -27,13 +28,96 @@ def test_llm_uses_configured_timeout(monkeypatch):
 
     def post(url, **kwargs):
         captured["timeout"] = kwargs["timeout"]
+        captured["json"] = kwargs["json"]
         return response
 
     monkeypatch.setattr(core, "PROVIDER", "openai")
+    monkeypatch.setattr(core, "FAST_BUILD", True)
+    monkeypatch.setattr(core, "LLM_MAX_OUTPUT_TOKENS", 1536)
     monkeypatch.setattr(core, "LLM_TIMEOUT_SECONDS", 900)
     monkeypatch.setattr(core.httpx, "post", post)
     assert core.llm("system", "user") == ("ok", 3)
     assert captured["timeout"] == 900
+    assert captured["json"]["max_tokens"] == 1536
+
+
+def test_fast_build_pipeline_generates_and_runs_tests_in_one_model_call(tmp_path, monkeypatch):
+    from backend import core
+    import uuid
+
+    pid = uuid.uuid4().hex[:10]
+    q(
+        "insert into projects(id,name,idea,constraints,status,created) values(?,?,?,?,?,?)",
+        (pid, "generic project", "Create a calculator that adds two numbers", "", "queued", time.time()),
+    )
+    monkeypatch.setattr(core, "WS", tmp_path)
+    monkeypatch.setattr(core, "FAST_BUILD", True)
+    monkeypatch.setattr(core, "NEED_OK", False)
+    monkeypatch.setattr(core, "MAX_FIX", 0)
+    calls = []
+    response = (
+        "### FILE: calculator.py\n```python\n"
+        "def add(left, right):\n    return left + right\n```\n"
+        "### FILE: tests/test_calculator.py\n```python\n"
+        "from calculator import add\n\n"
+        "def test_adds_positive_numbers():\n    assert add(2, 3) == 5\n\n"
+        "def test_adds_negative_numbers():\n    assert add(-2, -3) == -5\n```\n"
+        "### FILE: README.md\n```markdown\n# Calculator\n```\n"
+    )
+
+    def fake_agent(project_id, name, system, user):
+        calls.append(name)
+        return response
+
+    monkeypatch.setattr(core, "agent", fake_agent)
+    try:
+        core.pipeline(pid)
+        project = q("select status from projects where id=?", (pid,))[0]
+        assert project["status"] == "passed"
+        assert calls == ["engineer"]
+        review = (tmp_path / pid / "REVIEW.md").read_text()
+        assert "separate AI code/security review was skipped" in review
+        assert "Pytest result: **passed**" in review
+    finally:
+        q("delete from events where project_id=?", (pid,))
+        q("delete from projects where id=?", (pid,))
+
+
+def test_fast_build_repairs_real_test_failures(tmp_path, monkeypatch):
+    from backend import core
+    import uuid
+
+    pid = uuid.uuid4().hex[:10]
+    q(
+        "insert into projects(id,name,idea,constraints,status,created) values(?,?,?,?,?,?)",
+        (pid, "repairable project", "Create a calculator that adds two numbers", "", "queued", time.time()),
+    )
+    monkeypatch.setattr(core, "WS", tmp_path)
+    monkeypatch.setattr(core, "FAST_BUILD", True)
+    monkeypatch.setattr(core, "NEED_OK", False)
+    monkeypatch.setattr(core, "MAX_FIX", 1)
+    calls = []
+    initial = (
+        "### FILE: calculator.py\n```python\ndef add(left, right):\n    return left - right\n```\n"
+        "### FILE: tests/test_calculator.py\n```python\n"
+        "from calculator import add\n\ndef test_adds_numbers():\n    assert add(2, 3) == 5\n```\n"
+    )
+    fixed = "### FILE: calculator.py\n```python\ndef add(left, right):\n    return left + right\n```\n"
+
+    def fake_agent(project_id, name, system, user):
+        calls.append(name)
+        return fixed if "fixing failing tests" in system else initial
+
+    monkeypatch.setattr(core, "agent", fake_agent)
+    try:
+        core.pipeline(pid)
+        project = q("select status,fix_rounds from projects where id=?", (pid,))[0]
+        assert project["status"] == "passed"
+        assert project["fix_rounds"] == 1
+        assert calls == ["engineer", "engineer"]
+    finally:
+        q("delete from events where project_id=?", (pid,))
+        q("delete from projects where id=?", (pid,))
 
 
 def test_sandbox_runs_real_tests(tmp_path, monkeypatch):

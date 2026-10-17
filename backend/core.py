@@ -11,7 +11,20 @@ from pathlib import Path, PureWindowsPath
 import httpx
 
 from backend.database import q
-from backend.settings import BASE, IMAGE, KEY, LLM_TIMEOUT_SECONDS, MAX_FIX, MODEL, NEED_OK, PROVIDER, SANDBOX, WS
+from backend.settings import (
+    BASE,
+    FAST_BUILD,
+    IMAGE,
+    KEY,
+    LLM_MAX_OUTPUT_TOKENS,
+    LLM_TIMEOUT_SECONDS,
+    MAX_FIX,
+    MODEL,
+    NEED_OK,
+    PROVIDER,
+    SANDBOX,
+    WS,
+)
 
 TERMINAL = {"passed", "failed", "cancelled", "error"}
 APPROVALS = {}
@@ -52,6 +65,7 @@ def llm(system, user):
         json={
             "model": MODEL,
             "temperature": 0.2,
+            **({"max_tokens": LLM_MAX_OUTPUT_TOKENS} if FAST_BUILD else {}),
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
         },
     )
@@ -200,6 +214,56 @@ REVIEWER = (
     "You are a strict code reviewer. Given the plan, code and REAL test results, write a markdown review: Verdict "
     "(approve/changes needed), correctness issues, security issues, test-quality gaps, and unverified claims. Be specific; cite files."
 )
+FAST_ENGINEER = (
+    "Implement the user's requested small Python project now. Use Python standard library only. "
+    "Keep the solution focused and concise. Include complete runnable code, a short README.md, and meaningful "
+    "pytest tests under tests/ in this same response. Tests must verify real behavior and edge cases. "
+    "Do not write fake test reports or claim tests passed. Output every file in the required FILE format. "
+    + FMT
+)
+
+
+def quick_plan(idea):
+    return {
+        "summary": f"Build the requested Python project: {idea.strip()}",
+        "tasks": [
+            {"title": "Implement the requested features", "owner": "engineer"},
+            {"title": "Add behavior-focused automated tests", "owner": "tester"},
+            {"title": "Run pytest and repair any failures", "owner": "engineer"},
+            {"title": "Review the implementation and test results", "owner": "reviewer"},
+        ],
+        "files": ["Python source files", "tests/", "README.md"],
+        "acceptance": [
+            "The requested project behavior is implemented.",
+            "Automated tests cover core behavior and relevant edge cases.",
+            "The project's pytest suite runs successfully.",
+        ],
+        "risks": [],
+        "uncertain": ["The exact interface and optional features are inferred from the project description."],
+    }
+
+
+def contains_tests(files):
+    for path in files:
+        normalized = path.replace("\\", "/").casefold()
+        name = normalized.rsplit("/", 1)[-1]
+        if name.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py")):
+            return True
+    return False
+
+
+def fast_review(passed, output, files):
+    return (
+        "# Automated review\n\n"
+        f"- Verdict: {'ready for review' if passed else 'needs fixes'}\n"
+        f"- Pytest result: **{'passed' if passed else 'failed'}**\n"
+        f"- Files generated: {', '.join(files)}\n\n"
+        "This fast-build report uses the actual pytest result. A separate AI code/security review was skipped "
+        "to reduce local-model latency; passing tests do not guarantee the absence of defects.\n\n"
+        "## Test output\n\n```text\n"
+        f"{output}\n"
+        "```\n"
+    )
 
 
 def pipeline(pid):
@@ -209,7 +273,19 @@ def pipeline(pid):
         directory.mkdir(parents=True, exist_ok=True)
         (directory / "conftest.py").write_text("")
         setst(pid, "running")
-        plan = parse_json(agent(pid, "planner", PLANNER, f"Idea: {project['idea']}\nConstraints: {project['constraints'] or 'none'}"))
+        if FAST_BUILD:
+            emit(pid, "planner", "start", "Creating a quick local plan")
+            plan = quick_plan(project["idea"])
+            emit(pid, "planner", "done", "Plan ready (no model call)")
+        else:
+            plan = parse_json(
+                agent(
+                    pid,
+                    "planner",
+                    PLANNER,
+                    f"Idea: {project['idea']}\nConstraints: {project['constraints'] or 'none'}",
+                )
+            )
         q("update projects set plan=? where id=?", (json.dumps(plan), pid))
         emit(pid, "planner", "plan", f"Plan ready: {len(plan.get('tasks', []))} tasks, {len(plan.get('acceptance', []))} acceptance criteria")
         if NEED_OK:
@@ -228,14 +304,24 @@ def pipeline(pid):
         context = (
             f"Idea: {project['idea']}\nConstraints: {project['constraints']}\nPlan: {json.dumps(plan)}"
         )
-        files = write_files(pid, parse_files(agent(pid, "engineer", ENGINEER, context)))
+        engineer_prompt = FAST_ENGINEER if FAST_BUILD else ENGINEER
+        files = write_files(pid, parse_files(agent(pid, "engineer", engineer_prompt, context)))
         if not files:
             raise ValueError("Engineer produced no files")
         emit(pid, "engineer", "files", f"Wrote {len(files)} files: {', '.join(files)}")
-        tests = write_files(pid, parse_files(agent(pid, "tester", TESTER, context + "\nCODE:\n" + snapshot(pid))))
-        if not tests:
-            raise ValueError("Tester produced no tests")
-        emit(pid, "tester", "files", f"Wrote tests: {', '.join(tests)}")
+        if FAST_BUILD and contains_tests(files):
+            tests = [path for path in files if contains_tests([path])]
+            emit(pid, "tester", "start", "Using implementation-generated tests")
+            emit(pid, "tester", "done", f"Using tests generated with implementation: {', '.join(tests)}")
+        else:
+            tests = write_files(
+                pid,
+                parse_files(agent(pid, "tester", TESTER, context + "\nCODE:\n" + snapshot(pid))),
+            )
+        if not contains_tests(tests):
+            raise ValueError("Tester produced no pytest test files")
+        if not (FAST_BUILD and contains_tests(files)):
+            emit(pid, "tester", "files", f"Wrote tests: {', '.join(tests)}")
 
         passed, output = False, ""
         for round_number in range(MAX_FIX + 1):
@@ -258,10 +344,15 @@ def pipeline(pid):
             )
             emit(pid, "engineer", "files", f"Fix round {round_number+1}: changed {', '.join(fixed) or 'nothing'}")
 
-        review = agent(
-            pid, "reviewer", REVIEWER,
-            f"{context}\nTESTS PASSED: {passed}\nTEST OUTPUT:\n{output}\nCODE:\n{snapshot(pid)}",
-        )
+        if FAST_BUILD:
+            emit(pid, "reviewer", "start", "Preparing an automated test-result review")
+            review = fast_review(passed, output, list_files(pid))
+            emit(pid, "reviewer", "done", "Automated review ready (no model call)")
+        else:
+            review = agent(
+                pid, "reviewer", REVIEWER,
+                f"{context}\nTESTS PASSED: {passed}\nTEST OUTPUT:\n{output}\nCODE:\n{snapshot(pid)}",
+            )
         (directory / "REVIEW.md").write_text(review)
         project = q("select * from projects where id=?", (pid,))[0]
         report = (
