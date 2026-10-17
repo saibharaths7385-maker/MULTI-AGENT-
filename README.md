@@ -18,6 +18,8 @@ pytest                      # parser, path safety, authentication, sandbox tests
 Open http://localhost:8000. Anyone can create an account at `/register`; every person only sees their
 own projects. There is no admin password to configure. `AUTH_SECRET` is optional: if unset, Synapse
 creates one in `DATA_DIR` and reuses it. Set `LLM_API_KEY` (and optionally the other model settings).
+Ollama uses a 15-minute model request timeout by default because local generation can be slower; set
+`LLM_TIMEOUT_SECONDS` to override it. Other providers default to four minutes.
 Set `COOKIE_SECURE=1` when serving over HTTPS. Do not commit `.env` or real credentials.
 
 ## Forgot password email

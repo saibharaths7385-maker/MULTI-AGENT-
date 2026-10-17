@@ -14,6 +14,28 @@ def test_safe_rejects_traversal():
 def test_parse_json_with_noise():
     assert app.parse_json('here: {"a": 1} thanks') == {"a": 1}
 
+
+def test_llm_uses_configured_timeout(monkeypatch):
+    from backend import core
+    from types import SimpleNamespace
+
+    captured = {}
+    response = SimpleNamespace(
+        raise_for_status=lambda: None,
+        json=lambda: {"choices": [{"message": {"content": "ok"}}], "usage": {"total_tokens": 3}},
+    )
+
+    def post(url, **kwargs):
+        captured["timeout"] = kwargs["timeout"]
+        return response
+
+    monkeypatch.setattr(core, "PROVIDER", "openai")
+    monkeypatch.setattr(core, "LLM_TIMEOUT_SECONDS", 900)
+    monkeypatch.setattr(core.httpx, "post", post)
+    assert core.llm("system", "user") == ("ok", 3)
+    assert captured["timeout"] == 900
+
+
 def test_sandbox_runs_real_tests(tmp_path, monkeypatch):
     monkeypatch.setattr(app, "WS", tmp_path); d = tmp_path / "p"; (d / "tests").mkdir(parents=True)
     (d / "conftest.py").write_text(""); (d / "m.py").write_text("def f(): return 2\n")

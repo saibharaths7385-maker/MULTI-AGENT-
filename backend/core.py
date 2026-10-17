@@ -11,7 +11,7 @@ from pathlib import Path, PureWindowsPath
 import httpx
 
 from backend.database import q
-from backend.settings import BASE, IMAGE, KEY, MAX_FIX, MODEL, NEED_OK, PROVIDER, SANDBOX, WS
+from backend.settings import BASE, IMAGE, KEY, LLM_TIMEOUT_SECONDS, MAX_FIX, MODEL, NEED_OK, PROVIDER, SANDBOX, WS
 
 TERMINAL = {"passed", "failed", "cancelled", "error"}
 APPROVALS = {}
@@ -32,7 +32,7 @@ def llm(system, user):
     if PROVIDER == "anthropic":
         response = httpx.post(
             "https://api.anthropic.com/v1/messages",
-            timeout=240,
+            timeout=LLM_TIMEOUT_SECONDS,
             headers={"x-api-key": KEY, "anthropic-version": "2023-06-01"},
             json={
                 "model": MODEL,
@@ -47,7 +47,7 @@ def llm(system, user):
 
     response = httpx.post(
         f"{BASE}/chat/completions",
-        timeout=240,
+        timeout=LLM_TIMEOUT_SECONDS,
         headers={"Authorization": f"Bearer {KEY}"},
         json={
             "model": MODEL,
