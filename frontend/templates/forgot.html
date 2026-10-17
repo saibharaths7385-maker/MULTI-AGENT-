@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#0f1a3a">
+  <title>Forgot password · Synapse</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232748ff'/%3E%3Cpath d='M21 10.5c-1.5-1.6-3.4-2.2-5.2-2.2-2.6 0-4.6 1.3-4.6 3.4 0 4.9 10 2.2 10 8.1 0 2.4-2.2 3.9-5.1 3.9-2.3 0-4.4-.9-5.9-2.6' fill='none' stroke='white' stroke-width='2.6' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <script src="/assets/js/theme.js"></script>
+  <link rel="stylesheet" href="/assets/css/app.css">
+  <script src="/assets/js/auth.js" defer></script>
+</head>
+<body class="auth">
+  <section class="auth-art" aria-hidden="true">
+    <a class="brand" href="/login"><span class="brand-mark">S</span>Synapse</a>
+    <div>
+      <h2>Describe it. Four agents build and test it.</h2>
+      <p>Write what you want in plain English. Synapse plans it, codes it, runs real tests and reviews the result.</p>
+      <ol class="relay">
+        <li class="pulse" role="presentation"></li>
+        <li style="--i:0"><span class="node"></span><div><b>Planner</b><span>Turns your idea into tasks and acceptance checks</span></div></li>
+        <li style="--i:1"><span class="node"></span><div><b>Engineer</b><span>Writes the code and fixes what breaks</span></div></li>
+        <li style="--i:2"><span class="node"></span><div><b>Tester</b><span>Runs pytest in a sandbox</span></div></li>
+        <li style="--i:3"><span class="node"></span><div><b>Reviewer</b><span>Reads the code and reports what it found</span></div></li>
+      </ol>
+    </div>
+    <div class="sample">
+      <div>tests/test_snake.py <span class="pass">........</span> [100%]</div>
+      <div class="pass">8 passed in 0.31s</div>
+      <small>Sample output</small>
+    </div>
+  </section>
+  <main class="auth-main">
+    <div class="auth-box">
+      <a class="brand" href="/login"><span class="brand-mark">S</span>Synapse</a>
+      <div id="ask">
+        <h1>Reset your password</h1>
+        <p class="lead">Enter the email you signed up with. We'll send a link to choose a new password.</p>
+        <form id="forgot-form" novalidate>
+          <p id="form-error" class="form-error" role="alert" hidden></p>
+          <div class="field">
+            <label for="email" style="display:block;margin-bottom:6px">Email</label>
+            <input class="input" id="email" name="email" type="email" autocomplete="email" required autofocus>
+          </div>
+          <button class="btn btn-primary btn-block" type="submit">Send reset link</button>
+        </form>
+      </div>
+      <div id="done" class="sent" role="status" hidden>
+        <h2>Check your inbox</h2>
+        <p>If an account uses <b id="sent-to"></b>, a reset link is on its way. It works for one hour.</p>
+        <p class="note" id="no-mail" hidden>Email sending isn't set up on this server yet. The site owner needs to add a mail provider before reset links can be delivered.</p>
+      </div>
+      <p class="form-alt"><a href="/login">Back to sign in</a></p>
+    </div>
+  </main>
+</body>
+</html>
