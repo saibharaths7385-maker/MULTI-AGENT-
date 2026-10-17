@@ -83,6 +83,42 @@ def test_fast_build_pipeline_generates_and_runs_tests_in_one_model_call(tmp_path
         q("delete from projects where id=?", (pid,))
 
 
+def test_fast_build_falls_back_when_engineer_omits_tests(tmp_path, monkeypatch):
+    from backend import core
+    import uuid
+
+    pid = uuid.uuid4().hex[:10]
+    q(
+        "insert into projects(id,name,idea,constraints,status,created) values(?,?,?,?,?,?)",
+        (pid, "fallback project", "Create a greeting function", "", "queued", time.time()),
+    )
+    monkeypatch.setattr(core, "WS", tmp_path)
+    monkeypatch.setattr(core, "FAST_BUILD", True)
+    monkeypatch.setattr(core, "NEED_OK", False)
+    monkeypatch.setattr(core, "MAX_FIX", 0)
+    calls = []
+
+    def fake_agent(project_id, name, system, user):
+        calls.append(name)
+        if name == "engineer":
+            return "### FILE: greeting.py\n```python\ndef greet(name):\n    return f'Hello, {name}!'\n```\n"
+        return (
+            "### FILE: tests/test_greeting.py\n```python\n"
+            "from greeting import greet\n\n"
+            "def test_greet_uses_name():\n    assert greet('Sam') == 'Hello, Sam!'\n```\n"
+        )
+
+    monkeypatch.setattr(core, "agent", fake_agent)
+    try:
+        core.pipeline(pid)
+        project = q("select status from projects where id=?", (pid,))[0]
+        assert project["status"] == "passed"
+        assert calls == ["engineer", "tester"]
+    finally:
+        q("delete from events where project_id=?", (pid,))
+        q("delete from projects where id=?", (pid,))
+
+
 def test_fast_build_repairs_real_test_failures(tmp_path, monkeypatch):
     from backend import core
     import uuid

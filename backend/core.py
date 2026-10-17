@@ -215,10 +215,12 @@ REVIEWER = (
     "(approve/changes needed), correctness issues, security issues, test-quality gaps, and unverified claims. Be specific; cite files."
 )
 FAST_ENGINEER = (
-    "Implement the user's requested small Python project now. Use Python standard library only. "
-    "Keep the solution focused and concise. Include complete runnable code, a short README.md, and meaningful "
-    "pytest tests under tests/ in this same response. Tests must verify real behavior and edge cases. "
-    "Do not write fake test reports or claim tests passed. Output every file in the required FILE format. "
+    "Build a compact, working MVP of the requested Python project using the standard library only. "
+    "Implement only the core requested behavior; omit optional features and lengthy explanations. "
+    "Include runnable source, a brief README.md, and tests/test_app.py with 3 focused pytest tests in this "
+    "same response. Include every import used by the tests. Tests must check real behavior, not implementation "
+    "details. Keep each file concise. Do not omit the test file, write fake test reports, or claim tests passed. "
+    "Output every file in the required FILE format. "
     + FMT
 )
 

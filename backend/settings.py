@@ -13,7 +13,7 @@ BASE = os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1")
 KEY = os.getenv("LLM_API_KEY", "")
 FAST_BUILD = os.getenv("FAST_BUILD", "1" if PROVIDER == "ollama" else "0") == "1"
 LLM_TIMEOUT_SECONDS = float(os.getenv("LLM_TIMEOUT_SECONDS", "900" if PROVIDER == "ollama" else "240"))
-LLM_MAX_OUTPUT_TOKENS = int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "2048" if FAST_BUILD else "8192"))
+LLM_MAX_OUTPUT_TOKENS = int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "1024" if FAST_BUILD else "8192"))
 SANDBOX = os.getenv("SANDBOX", "process")
 IMAGE = os.getenv("SANDBOX_IMAGE", "synapse-sandbox")
 MAX_FIX = int(os.getenv("MAX_FIX_ROUNDS", "1" if FAST_BUILD else "3"))
