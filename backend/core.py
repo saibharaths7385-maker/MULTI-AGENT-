@@ -27,6 +27,7 @@ from backend.settings import (
 )
 
 TERMINAL = {"passed", "failed", "cancelled", "error"}
+ACTIVE = {"queued", "running", "awaiting_approval"}
 APPROVALS = {}
 
 
@@ -217,9 +218,10 @@ REVIEWER = (
 FAST_ENGINEER = (
     "Build a compact, working MVP of the requested Python project using the standard library only. "
     "Implement only the core requested behavior; omit optional features and lengthy explanations. "
-    "Include runnable source, a brief README.md, and tests/test_app.py with 3 focused pytest tests in this "
-    "same response. Include every import used by the tests. Tests must check real behavior, not implementation "
-    "details. Keep each file concise. Do not omit the test file, write fake test reports, or claim tests passed. "
+    "Output exactly these three files once each, in this order: app.py, tests/test_app.py, README.md. "
+    "The test file must have 3 short pytest tests and all required imports. README.md must be one sentence "
+    "with no code blocks. Do not output setup files, extra files, duplicate file blocks, explanations, or "
+    "fake test results. Keep the implementation and tests concise. "
     "Output every file in the required FILE format. "
     + FMT
 )
@@ -268,14 +270,19 @@ def fast_review(passed, output, files):
     )
 
 
-def pipeline(pid):
+def pipeline(pid, resume=False):
     try:
         project = q("select * from projects where id=?", (pid,))[0]
         directory = WS / pid
         directory.mkdir(parents=True, exist_ok=True)
-        (directory / "conftest.py").write_text("")
+        conftest = directory / "conftest.py"
+        if not resume or not conftest.exists():
+            conftest.write_text("")
         setst(pid, "running")
-        if FAST_BUILD:
+        if resume and project["plan"]:
+            plan = json.loads(project["plan"])
+            emit(pid, "system", "info", "Resuming with the saved plan")
+        elif FAST_BUILD:
             emit(pid, "planner", "start", "Creating a quick local plan")
             plan = quick_plan(project["idea"])
             emit(pid, "planner", "done", "Plan ready (no model call)")
@@ -290,7 +297,7 @@ def pipeline(pid):
             )
         q("update projects set plan=? where id=?", (json.dumps(plan), pid))
         emit(pid, "planner", "plan", f"Plan ready: {len(plan.get('tasks', []))} tasks, {len(plan.get('acceptance', []))} acceptance criteria")
-        if NEED_OK:
+        if NEED_OK and not (resume and project["plan"]):
             event = threading.Event()
             APPROVALS[pid] = (event, {})
             setst(pid, "awaiting_approval")
@@ -306,12 +313,21 @@ def pipeline(pid):
         context = (
             f"Idea: {project['idea']}\nConstraints: {project['constraints']}\nPlan: {json.dumps(plan)}"
         )
-        engineer_prompt = FAST_ENGINEER if FAST_BUILD else ENGINEER
-        files = write_files(pid, parse_files(agent(pid, "engineer", engineer_prompt, context)))
+        if resume:
+            (directory / "REVIEW.md").unlink(missing_ok=True)
+            (directory / "REPORT.md").unlink(missing_ok=True)
+        files = list_files(pid) if resume else []
+        if files:
+            emit(pid, "engineer", "done", f"Continuing with {len(files)} saved project files")
+        else:
+            engineer_prompt = FAST_ENGINEER if FAST_BUILD else ENGINEER
+            files = write_files(pid, parse_files(agent(pid, "engineer", engineer_prompt, context)))
         if not files:
             raise ValueError("Engineer produced no files")
-        emit(pid, "engineer", "files", f"Wrote {len(files)} files: {', '.join(files)}")
-        if FAST_BUILD and contains_tests(files):
+        if not resume:
+            emit(pid, "engineer", "files", f"Wrote {len(files)} files: {', '.join(files)}")
+        reuse_tests = contains_tests(files) and (FAST_BUILD or resume)
+        if reuse_tests:
             tests = [path for path in files if contains_tests([path])]
             emit(pid, "tester", "start", "Using implementation-generated tests")
             emit(pid, "tester", "done", f"Using tests generated with implementation: {', '.join(tests)}")
@@ -322,7 +338,7 @@ def pipeline(pid):
             )
         if not contains_tests(tests):
             raise ValueError("Tester produced no pytest test files")
-        if not (FAST_BUILD and contains_tests(files)):
+        if not reuse_tests:
             emit(pid, "tester", "files", f"Wrote tests: {', '.join(tests)}")
 
         passed, output = False, ""

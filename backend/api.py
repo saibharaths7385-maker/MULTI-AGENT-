@@ -10,7 +10,7 @@ import zipfile
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend import core
 from backend.auth import router as auth_router
@@ -26,6 +26,10 @@ class NewProject(BaseModel):
     idea: str
     name: str = ""
     constraints: str = ""
+
+
+class FileUpdate(BaseModel):
+    content: str = Field(max_length=1_000_000)
 
 
 def uid(request: Request):
@@ -144,6 +148,28 @@ def file(pid: str, path: str, request: Request):
     return Response(target.read_text(errors="replace"), media_type="text/plain")
 
 
+@router.put("/api/projects/{pid}/file")
+def update_file(pid: str, path: str, payload: FileUpdate, request: Request):
+    row = require_project(pid, request)
+    if row["status"] in core.ACTIVE:
+        raise HTTPException(409, "Stop the build before editing project files.")
+    try:
+        relative = core.safe(path)
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
+    project_root = (WS / pid).resolve()
+    target = (project_root / relative).resolve()
+    if (
+        project_root not in target.parents
+        or not target.is_file()
+        or target.relative_to(project_root).as_posix()
+        not in {item.replace("\\", "/") for item in core.list_files(pid)}
+    ):
+        raise HTTPException(404, "Project file not found")
+    target.write_text(payload.content, encoding="utf-8")
+    return {"ok": True}
+
+
 def decide(pid, approved, request: Request):
     require_project(pid, request)
     if pid not in core.APPROVALS:
@@ -173,6 +199,17 @@ def cancel(pid: str, request: Request):
     return {"ok": True}
 
 
+@router.post("/api/projects/{pid}/run")
+def run_project(pid: str, request: Request):
+    row = require_project(pid, request)
+    if row["status"] not in core.TERMINAL:
+        raise HTTPException(409, "Wait for the current build to finish before running it again.")
+    core.setst(pid, "queued")
+    core.emit(pid, "system", "info", "Resuming from the saved project files")
+    threading.Thread(target=core.pipeline, args=(pid, True), daemon=True).start()
+    return {"id": pid}
+
+
 @router.get("/api/projects/{pid}/download")
 def download(pid: str, request: Request):
     require_project(pid, request)
@@ -189,7 +226,9 @@ def download(pid: str, request: Request):
 
 @router.delete("/api/projects/{pid}")
 def delete(pid: str, request: Request):
-    require_project(pid, request)
+    row = require_project(pid, request)
+    if row["status"] in core.ACTIVE:
+        raise HTTPException(409, "Stop the build before deleting this project.")
     shutil.rmtree(WS / pid, ignore_errors=True)
     q("delete from events where project_id=?", (pid,))
     q("delete from projects where id=?", (pid,))

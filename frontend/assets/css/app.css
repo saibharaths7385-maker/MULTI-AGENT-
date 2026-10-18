@@ -359,6 +359,8 @@ body.app { display: grid; grid-template-columns: 284px 1fr; }
   margin: 10px 0 0; padding: 14px; max-height: 420px; overflow: auto; border-radius: 10px;
   background: var(--deep); color: var(--log-fg); font: 12.5px/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere;
 }
+.code-editor { display: block; width: 100%; min-height: 420px; max-height: none; resize: vertical; border: 0; outline: none; }
+.editor-actions { display: flex; align-items: center; gap: 12px; margin-top: 10px; color: var(--ink-soft); font-size: 13px; }
 .muted { color: var(--ink-faint); }
 .offline { max-width: 520px; margin: 12vh auto; text-align: center; }
 .offline h1 { margin-bottom: 10px; font: 700 32px var(--display); letter-spacing: -.03em; }

@@ -25,7 +25,7 @@ implementation and tests together, runs real pytest, and produces a clearly labe
 review instead of spending extra model calls on separate planner, tester, and reviewer stages. The human
 approval gate remains enabled by default. If the implementation omits test files, Synapse falls back to its
 separate tester call. Failed tests still trigger repair attempts (`MAX_FIX_ROUNDS`, default one in fast mode).
-Fast mode asks for a compact MVP and caps model output at 1024 tokens by default; set `LLM_MAX_OUTPUT_TOKENS`
+Fast mode asks for a compact MVP and caps model output at 512 tokens by default; set `LLM_MAX_OUTPUT_TOKENS`
 higher if a project needs more code. Set `FAST_BUILD=0` to use the full multi-agent flow. Fast mode reduces
 unnecessary calls, but cannot guarantee
 sub-10-second builds: generation speed still depends on the model and hardware.

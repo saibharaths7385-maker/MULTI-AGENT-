@@ -19,6 +19,8 @@ const ACTIVE = ["queued", "running", "awaiting_approval"];
 
 let currentProject = null;
 let eventSource = null;
+let eventProjectId = null;
+let lastEventId = 0;
 let activeTab = "files";
 let project = null;
 let agentStates = {};
@@ -157,6 +159,8 @@ async function createProject() {
 /* ---------- project view ---------- */
 async function openProject(id) {
   if (eventSource) eventSource.close();
+  if (eventProjectId !== id) lastEventId = 0;
+  eventProjectId = id;
   currentProject = id;
   agentStates = {};
   activeTab = "files";
@@ -173,9 +177,11 @@ async function openProject(id) {
     handleError(error);
     return;
   }
-  eventSource = new EventSource(`/api/projects/${id}/events`);
+  eventSource = new EventSource(`/api/projects/${id}/events?after=${lastEventId}`);
   eventSource.onmessage = (event) => {
-    addEvent(JSON.parse(event.data));
+    const item = JSON.parse(event.data);
+    lastEventId = Math.max(lastEventId, Number(item.id) || 0);
+    addEvent(item);
     refreshProject().catch(handleError);
   };
   eventSource.addEventListener("end", () => {
@@ -204,9 +210,14 @@ async function refreshProject() {
     <div class="actions">
       <a class="btn btn-sm" href="/api/projects/${id}/download">Download zip</a>
       ${ACTIVE.includes(status) ? '<button class="btn btn-sm btn-danger" id="stop">Stop</button>' : ""}
-      <button class="btn btn-sm btn-danger" id="delete">Delete</button>
+      ${status === "passed"
+        ? '<button class="btn btn-sm btn-primary" id="run">Run again</button>'
+        : ["failed", "error", "cancelled"].includes(status)
+          ? '<button class="btn btn-sm btn-primary" id="run">Resume from saved files</button>' : ""}
+      ${ACTIVE.includes(status) ? "" : '<button class="btn btn-sm btn-danger" id="delete">Delete</button>'}
     </div></div>`;
   $("#stop")?.addEventListener("click", () => projectAction("cancel"));
+  $("#run")?.addEventListener("click", () => projectAction("run"));
   $("#delete")?.addEventListener("click", deleteProject);
   $("#banner").innerHTML = status === "awaiting_approval"
     ? `<div class="banner"><div><b>Your approval is needed.</b> Read the plan, then let the engineer start.</div>
@@ -254,10 +265,13 @@ async function renderPane() {
       pane.innerHTML = '<p class="muted">Files appear here as the engineer writes them.</p>';
       return;
     }
-    const open = pane.dataset.open;
+    const open = pane.dataset.open
+      || project.files.find((file) => file.toLowerCase().endsWith(".py"))
+      || project.files[0];
+    pane.dataset.open = open;
     pane.innerHTML = project.files.map((file) =>
       `<button class="fileitem ${file === open ? "on" : ""}" data-file="${esc(file)}">${esc(file)}</button>`).join("")
-      + '<pre class="code" id="file-content" hidden></pre>';
+      + '<div id="file-view"></div>';
     pane.querySelectorAll("[data-file]").forEach((element) => {
       element.addEventListener("click", () => {
         pane.dataset.open = element.dataset.file;
@@ -291,10 +305,44 @@ async function showFile(path) {
   if (response.status === 401) { location.replace("/login"); return; }
   if (!response.ok) throw new Error("Couldn't open that file.");
   const content = await response.text();
+  if (id !== currentProject) return;
+  const view = $("#file-view");
+  if (view) {
+    const editable = !ACTIVE.includes(project.status)
+      && (path.toLowerCase().endsWith(".py") || path.toLowerCase() === "readme.md");
+    if (editable) {
+      view.innerHTML = `<textarea class="code code-editor" id="file-content" aria-label="Edit ${esc(path)}"
+        spellcheck="false">${esc(content)}</textarea>
+        <div class="editor-actions"><button class="btn btn-sm btn-primary" id="save-file">Save changes</button>
+        <span id="save-status" role="status"></span></div>`;
+      $("#save-file").addEventListener("click", () => saveFile(path));
+    } else {
+      view.innerHTML = '<pre class="code" id="file-content"></pre>';
+      $("#file-content").textContent = content;
+    }
+    return;
+  }
   const element = $("#file-content");
-  if (!element || id !== currentProject) return;
-  element.hidden = false;
-  element.textContent = content;
+  if (element) element.textContent = content;
+}
+
+async function saveFile(path) {
+  const button = $("#save-file");
+  const status = $("#save-status");
+  button.disabled = true;
+  status.textContent = "Saving…";
+  try {
+    await api(`/api/projects/${currentProject}/file?path=${encodeURIComponent(path)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: $("#file-content").value }),
+    });
+    status.textContent = "Saved. Run again to test your changes.";
+  } catch (error) {
+    status.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function addEvent(event) {
@@ -320,7 +368,13 @@ function addEvent(event) {
 async function projectAction(action) {
   try {
     await api(`/api/projects/${currentProject}/${action}`, { method: "POST" });
-    await refreshProject();
+    if (action === "run") {
+      const id = currentProject;
+      agentStates = {};
+      await openProject(id);
+    } else {
+      await refreshProject();
+    }
   } catch (error) {
     handleError(error);
   }

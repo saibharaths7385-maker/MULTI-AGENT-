@@ -1,3 +1,4 @@
+import json
 import app
 import pytest
 import time
@@ -156,6 +157,108 @@ def test_fast_build_repairs_real_test_failures(tmp_path, monkeypatch):
         q("delete from projects where id=?", (pid,))
 
 
+def test_resume_reuses_saved_files_and_skips_generation(tmp_path, monkeypatch):
+    from backend import core
+    import uuid
+
+    pid = uuid.uuid4().hex[:10]
+    q(
+        "insert into projects(id,name,idea,constraints,status,plan,created) values(?,?,?,?,?,?,?)",
+        (
+            pid,
+            "resumable project",
+            "Create a calculator",
+            "",
+            "failed",
+            json.dumps(core.quick_plan("Create a calculator")),
+            time.time(),
+        ),
+    )
+    project_dir = tmp_path / pid
+    (project_dir / "tests").mkdir(parents=True)
+    (project_dir / "calculator.py").write_text(
+        "def add(left, right):\n    return left + right\n"
+    )
+    (project_dir / "tests" / "test_calculator.py").write_text(
+        "from calculator import add\n\ndef test_adds_numbers():\n    assert add(2, 3) == 5\n"
+    )
+    monkeypatch.setattr(core, "WS", tmp_path)
+    monkeypatch.setattr(core, "FAST_BUILD", True)
+    monkeypatch.setattr(core, "NEED_OK", True)
+    monkeypatch.setattr(core, "MAX_FIX", 0)
+    monkeypatch.setattr(core, "agent", lambda *args: pytest.fail("resume should reuse saved files"))
+    try:
+        core.pipeline(pid, resume=True)
+        project = q("select status from projects where id=?", (pid,))[0]
+        assert project["status"] == "passed"
+    finally:
+        q("delete from events where project_id=?", (pid,))
+        q("delete from projects where id=?", (pid,))
+
+
+def test_project_edit_rerun_and_delete_flow(tmp_path, monkeypatch):
+    from backend import api, core
+    import threading
+
+    monkeypatch.setattr(api, "WS", tmp_path)
+    monkeypatch.setattr(core, "WS", tmp_path)
+    client = new_client()
+    sign_up(client, "project-owner", "project-owner@example.com")
+    user_id = q("select id from users where username='project-owner'")[0]["id"]
+    pid = "fedcba9876"
+    q(
+        "insert into projects(id,name,idea,constraints,status,created,user_id) values(?,?,?,?,?,?,?)",
+        (pid, "editable", "Create a greeting", "", "passed", time.time(), user_id),
+    )
+    project_dir = tmp_path / pid
+    project_dir.mkdir()
+    source_file = project_dir / "app.py"
+    source_file.write_text("def greet():\n    return 'hello'\n")
+
+    updated_content = "def greet():\n    return 'welcome'\n"
+    response = client.put(
+        f"/api/projects/{pid}/file",
+        params={"path": "app.py"},
+        json={"content": updated_content},
+    )
+    assert response.status_code == 200
+    assert source_file.read_text() == updated_content
+    assert client.put(
+        f"/api/projects/{pid}/file",
+        params={"path": "../outside.py"},
+        json={"content": "unsafe"},
+    ).status_code == 400
+
+    q("update projects set status='running' where id=?", (pid,))
+    assert client.put(
+        f"/api/projects/{pid}/file",
+        params={"path": "app.py"},
+        json={"content": "def greet(): return 'changed'\n"},
+    ).status_code == 409
+    assert client.delete(f"/api/projects/{pid}").status_code == 409
+
+    called = threading.Event()
+    run_args = []
+
+    def record_pipeline(project_id, resume=False):
+        run_args.append((project_id, resume))
+        called.set()
+
+    monkeypatch.setattr(core, "pipeline", record_pipeline)
+    q("update projects set status='passed' where id=?", (pid,))
+    response = client.post(f"/api/projects/{pid}/run")
+    assert response.status_code == 200
+    assert response.json() == {"id": pid}
+    assert called.wait(5)
+    assert run_args == [(pid, True)]
+    assert q("select status from projects where id=?", (pid,))[0]["status"] == "queued"
+    assert client.delete(f"/api/projects/{pid}").status_code == 409
+
+    q("update projects set status='passed' where id=?", (pid,))
+    assert client.delete(f"/api/projects/{pid}").status_code == 200
+    assert not project_dir.exists()
+
+
 def test_sandbox_runs_real_tests(tmp_path, monkeypatch):
     monkeypatch.setattr(app, "WS", tmp_path); d = tmp_path / "p"; (d / "tests").mkdir(parents=True)
     (d / "conftest.py").write_text(""); (d / "m.py").write_text("def f(): return 2\n")
@@ -240,6 +343,74 @@ def test_projects_are_private_per_user():
     assert b.delete(f"/api/projects/{pid}").status_code == 404
     assert a.get(f"/api/projects/{pid}").status_code == 200
     assert "user_id" not in a.get(f"/api/projects/{pid}").json()
+
+
+def test_project_edit_rerun_and_delete_flow(tmp_path, monkeypatch):
+    from backend import api, core
+
+    monkeypatch.setattr(api, "WS", tmp_path)
+    monkeypatch.setattr(core, "WS", tmp_path)
+    client = new_client()
+    sign_up(client, "project-owner", "project-owner@example.com")
+    user_id = q("select id from users where username='project-owner'")[0]["id"]
+    pid = "fedcba9876"
+    q(
+        "insert into projects(id,name,idea,constraints,status,created,user_id) values(?,?,?,?,?,?,?)",
+        (pid, "editable", "Create a greeting", "", "passed", time.time(), user_id),
+    )
+    project_dir = tmp_path / pid
+    project_dir.mkdir()
+    source_file = project_dir / "app.py"
+    source_file.write_text("def greet():\n    return 'hello'\n")
+
+    updated_content = "def greet():\n    return 'welcome'\n"
+    response = client.put(
+        f"/api/projects/{pid}/file",
+        params={"path": "app.py"},
+        json={"content": updated_content},
+    )
+    assert response.status_code == 200
+    assert source_file.read_text() == updated_content
+    assert client.put(
+        f"/api/projects/{pid}/file",
+        params={"path": "../outside.py"},
+        json={"content": "unsafe"},
+    ).status_code == 400
+
+    threads = []
+
+    class FakeThread:
+        def __init__(self, target, args, daemon):
+            self.target = target
+            self.args = args
+            self.daemon = daemon
+
+        def start(self):
+            threads.append(self)
+
+    monkeypatch.setattr(api.threading, "Thread", FakeThread)
+    q("update projects set status='running' where id=?", (pid,))
+    assert response.status_code == 200
+    assert client.put(
+        f"/api/projects/{pid}/file",
+        params={"path": "app.py"},
+        json={"content": "def greet(): return 'changed'\n"},
+    ).status_code == 409
+    assert client.delete(f"/api/projects/{pid}").status_code == 409
+
+    q("update projects set status='passed' where id=?", (pid,))
+    response = client.post(f"/api/projects/{pid}/run")
+    assert response.status_code == 200
+    assert response.json() == {"id": pid}
+    assert len(threads) == 1
+    assert threads[0].target is core.pipeline
+    assert threads[0].args == (pid, True)
+    assert q("select status from projects where id=?", (pid,))[0]["status"] == "queued"
+    assert client.delete(f"/api/projects/{pid}").status_code == 409
+
+    q("update projects set status='passed' where id=?", (pid,))
+    assert client.delete(f"/api/projects/{pid}").status_code == 200
+    assert not project_dir.exists()
 
 
 def test_forgot_and_reset_password_flow(monkeypatch):
